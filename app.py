@@ -7,8 +7,10 @@ import time
 # --- INITIAL SETUP ---
 st.set_page_config(page_title="CampusMind", layout="wide")
 
-# 1. PASTE YOUR GROQ API KEY HERE
-GROQ_API_KEY = "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" 
+import os
+
+GROQ_API_KEY = os.getenv("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")
+
 
 try:
     client = Groq(api_key=GROQ_API_KEY)
