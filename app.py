@@ -8,8 +8,7 @@ import time
 st.set_page_config(page_title="CampusMind", layout="wide")
 
 import os
-
-GROQ_API_KEY = os.getenv("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")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 try:
