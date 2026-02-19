@@ -2,3 +2,7 @@ streamlit
 groq
 pypdf
 python-dotenv
+audio-recorder-streamlit
+docx2txt
+python-pptx
+google-api-python-client
