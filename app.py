@@ -1,5 +1,3 @@
-import docx2txt
-from pptx import Presentation
 import streamlit as st
 from groq import Groq
 from pypdf import PdfReader
@@ -7,14 +5,20 @@ import os
 from dotenv import load_dotenv
 from audio_recorder_streamlit import audio_recorder
 import tempfile
+import docx2txt
+from pptx import Presentation
+from googleapiclient.discovery import build
 
 # --- INITIAL SETUP ---
 st.set_page_config(page_title="CampusMind AI", page_icon="🧠", layout="wide")
 
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+
 try:
     client = Groq(api_key=GROQ_API_KEY)
+    youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
 except Exception as e:
     st.error(f"API Key Error: {e}")
 
@@ -33,12 +37,11 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-
-if 'chat_answer' not in st.session_state: st.session_state.chat_answer = ""
+# --- INIT SESSION STATES ---
 if 'summary_answer' not in st.session_state: st.session_state.summary_answer = ""
 if 'exam_answer' not in st.session_state: st.session_state.exam_answer = ""
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'chat_history' not in st.session_state: st.session_state.chat_history = [] # 👈 NEW CHAT MEMORY
+if 'chat_history' not in st.session_state: st.session_state.chat_history = []
 
 # ==========================================
 # 🛑 SECURE LOGIN SYSTEM (HACKATHON DEMO MODE)
@@ -67,7 +70,7 @@ if not st.session_state.logged_in:
 # ✅ IF LOGGED IN, THE MAIN APP RUNS BELOW
 # ==========================================
 
-# --- GROQ GENERATOR (UPGRADED TO 70B MODEL) ---
+# --- AI GENERATORS ---
 def smart_generate(prompt):
     try:
         chat_completion = client.chat.completions.create(
@@ -78,16 +81,35 @@ def smart_generate(prompt):
         return chat_completion.choices[0].message.content
     except Exception as e:
         print(f"⚠️ Groq failed: {e}")
-        return "⚠️ **Offline Mode Active:** The live AI is currently overwhelmed by hackathon traffic. Please refer to the cached context."
+        return "⚠️ **Offline Mode Active:** AI is currently overwhelmed."
 
-# --- SIDEBAR LOGIC ---
+def search_youtube(query, max_results=3):
+    try:
+        request = youtube.search().list(
+            q=query,
+            part="snippet",
+            type="video",
+            maxResults=max_results
+        )
+        response = request.execute()
+        
+        videos = []
+        for item in response['items']:
+            videos.append({
+                "id": item['id']['videoId'], 
+                "title": item['snippet']['title']
+            })
+        return videos
+    except Exception as e:
+        print(f"YouTube API Error: {e}")
+        return []
+
 # --- SIDEBAR LOGIC ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/4185/4185848.png", width=60)
     st.title("CampusMind Data")
     st.markdown("Upload your institutional resources to train the digital brain.")
     
-    # 1. UPGRADED UPLOADER: Now takes PDF, DOCX, and PPTX!
     uploaded_file = st.file_uploader("Drop PDF, Word, or PPT here", type=["pdf", "docx", "pptx"])
     
     if uploaded_file:
@@ -101,7 +123,6 @@ with st.sidebar:
                     for i, page in enumerate(reader.pages):
                         text = page.extract_text()
                         if text:
-                            # INJECT METADATA
                             raw_text += f"\n\n--- [Source: Page {i+1}] ---\n{text}"
                             
                 # 2. READ WORD DOC
@@ -118,10 +139,8 @@ with st.sidebar:
                             if hasattr(shape, "text"):
                                 slide_text += shape.text + "\n"
                         if slide_text.strip():
-                            # INJECT METADATA
                             raw_text += f"\n\n--- [Source: Slide {i+1}] ---\n{slide_text}"
                                 
-                # Save to session state
                 st.session_state.clean_text = raw_text[:20000] 
                 
         st.success(f"✅ Indexed File: {uploaded_file.name}")
@@ -129,7 +148,6 @@ with st.sidebar:
     st.markdown("---")
     if st.button("🚪 Log Out"):
         st.session_state.logged_in = False
-        # Clear the document cache when logging out
         if 'clean_text' in st.session_state:
             del st.session_state['clean_text']
         st.rerun()
@@ -139,28 +157,23 @@ st.title("🧠 CampusMind")
 st.markdown("#### *Your AI-Powered Academic Copilot*")
 st.divider()
 
-tab1, tab2, tab3, tab4 = st.tabs(["🔍 Semantic Search", "📝 Auto-Notes", "🎓 Exam Simulator", "🎬 Video-to-Notes"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 Semantic Search", "📝 Auto-Notes", "🎓 Exam Simulator", "🎬 Video-to-Notes", "📺 AI Video Tutor"])
 
 # TAB 1: THE CHATGPT INTERFACE
 with tab1:
     if 'clean_text' in st.session_state:
         st.markdown("### 💬 Chat with your Document")
         
-        # 1. Display previous chat history (The scrolling effect)
         for message in st.session_state.chat_history:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
         
-        # 2. Voice Input (Optional)
         st.write("🎙️ **Ask with Voice:**")
         audio_bytes = audio_recorder(text="Click to Record", recording_color="#e83e8c", neutral_color="#4F46E5", key="chat_audio")
         
-        # 3. Streamlit's native Chat Input (Pins to the bottom!)
         query = st.chat_input("Type your question here...")
         
-        # 4. Handle Voice OR Text input
         final_query = None
-        
         if audio_bytes:
             with st.spinner("Listening..."):
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
@@ -178,21 +191,23 @@ with tab1:
         elif query:
             final_query = query
             
-        # 5. Generate AI Response and add to chat!
         if final_query:
-            # Display user message instantly
             st.session_state.chat_history.append({"role": "user", "content": final_query})
             with st.chat_message("user"):
                 st.markdown(final_query)
             
-            # Display AI thinking and response
             with st.chat_message("assistant"):
                 with st.spinner("Analyzing document..."):
-                    prompt = f"Context: {st.session_state.clean_text}\n\nQuestion: {final_query}\n\nTask: Provide a highly detailed, comprehensive answer based ONLY on the context. Break down the reasoning step-by-step."
+                    prompt = f"""Context:
+{st.session_state.clean_text}
+
+Question: {final_query}
+
+Task: You are an expert academic AI. Provide a highly detailed, comprehensive answer based ONLY on the context. 
+CRITICAL RULE: You MUST cite your sources. At the end of every claim or bullet point, include the exact source tag provided in the context (e.g., [Source: Page 4] or [Source: Slide 12]). Do not make up sources."""
                     response = smart_generate(prompt)
                     st.markdown(response)
             
-            # Save AI response to memory
             st.session_state.chat_history.append({"role": "assistant", "content": response})
             
     else:
@@ -204,7 +219,7 @@ with tab2:
         st.markdown("### Instant Revision Notes")
         if st.button("✨ Generate Smart Summary"):
             with st.spinner("Synthesizing notes..."):
-                prompt = f"Context: {st.session_state.clean_text}\n\nTask: Act as an expert professor. Provide an in-depth, comprehensive summary of this document. Include an executive overview, detailed bullet points of all core concepts, and explain why these concepts are important. Do not be concise; be extremely thorough."
+                prompt = f"Context: {st.session_state.clean_text}\n\nTask: Act as an expert professor. Provide an in-depth, comprehensive summary of this document. Include an executive overview, detailed bullet points of all core concepts, and explain why these concepts are important. Do not be concise; be extremely thorough. Cite sources where possible."
                 st.session_state.summary_answer = smart_generate(prompt)
         
         if st.session_state.summary_answer:
@@ -227,7 +242,7 @@ with tab3:
         num_questions = st.slider("How many questions do you want to generate?", min_value=1, max_value=15, value=5)
         if st.button("🎯 Generate Practice Test"):
             with st.spinner(f"Analyzing past patterns to generate {num_questions} questions..."):
-                prompt = f"Context: {st.session_state.clean_text}\n\nTask: Generate {num_questions} probable viva/exam questions with short answers."
+                prompt = f"Context: {st.session_state.clean_text}\n\nTask: Generate {num_questions} probable viva/exam questions with short answers based ONLY on the context provided."
                 st.session_state.exam_answer = smart_generate(prompt)
         
         if st.session_state.exam_answer:
@@ -268,3 +283,34 @@ with tab4:
                         
                 except Exception as e:
                     st.error(f"⚠️ Error: {e}. Make sure your video is under 25MB!")
+
+# TAB 5: AI-SUGGESTED VIDEO LECTURES
+with tab5:
+    st.markdown("### 📺 AI-Suggested Video Lectures")
+    st.caption("The AI will analyze your notes and fetch the best YouTube crash courses for you.")
+    
+    if 'clean_text' in st.session_state:
+        if st.button("🔍 Find Video Tutorials for these Notes"):
+            with st.spinner("Analyzing notes to find the best YouTube tutorials..."):
+                
+                # Step 1: Groq reads the first 5000 characters and writes a search query
+                query_prompt = f"Context: {st.session_state.clean_text[:5000]}\n\nTask: What is the absolute best 3-word YouTube search query to find a crash course on this material? Reply ONLY with the exact search query, no quotes, no extra words."
+                search_term = smart_generate(query_prompt).replace('"', '').strip()
+                
+                st.success(f"**Groq identified the core topic:** {search_term}")
+                
+                # Step 2: Pass Groq's search term to the live YouTube API
+                videos = search_youtube(search_term)
+                
+                # Step 3: Display results natively
+                if videos:
+                    cols = st.columns(3) 
+                    for i, video in enumerate(videos):
+                        if i < 3: # Safety check to only map 3 columns
+                            with cols[i]:
+                                st.video(f"https://www.youtube.com/watch?v={video['id']}")
+                                st.caption(video['title'])
+                else:
+                    st.error("Could not fetch videos. Check your YouTube API Key and quota.")
+    else:
+        st.info("👈 Please upload a PDF, Word Doc, or PPT in the sidebar first.")
