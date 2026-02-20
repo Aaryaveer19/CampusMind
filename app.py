@@ -34,6 +34,18 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] { gap: 24px; }
     .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: transparent; border-radius: 4px 4px 0px 0px; gap: 1px; padding-top: 10px; padding-bottom: 10px; }
     .stTabs [aria-selected="true"] { color: #A78BFA !important; border-bottom: 2px solid #A78BFA !important; }
+    /* 🔥 NEW: Audio Processing Animation */
+    @keyframes pulse-text {
+        0% { opacity: 0.3; transform: scale(0.98); }
+        50% { opacity: 1; transform: scale(1.02); text-shadow: 0 0 10px #e83e8c; }
+        100% { opacity: 0.3; transform: scale(0.98); }
+    }
+    .listening-animation {
+        color: #e83e8c;
+        font-weight: bold;
+        animation: pulse-text 1.5s infinite;
+        padding: 10px 0px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -50,7 +62,7 @@ if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True) 
-        st.image("https://cdn-icons-png.flaticon.com/512/4185/4185848.png", width=80)
+        st.markdown('<div style="text-align: center;"><img src="https://cdn-icons-png.flaticon.com/512/4185/4185848.png" width="80" style="filter: invert(1) brightness(2);"></div>', unsafe_allow_html=True)
         st.title("CampusMind Portal")
         st.markdown("Please log in with your University credentials.")
         
@@ -106,7 +118,7 @@ def search_youtube(query, max_results=3):
 
 # --- SIDEBAR LOGIC ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/4185/4185848.png", width=60)
+    st.markdown('<div style="text-align: center;"><img src="https://cdn-icons-png.flaticon.com/512/4185/4185848.png" width="60" style="filter: invert(1) brightness(2); margin-bottom: 15px;"></div>', unsafe_allow_html=True)
     st.title("CampusMind Data")
     st.markdown("Upload your institutional resources to train the digital brain.")
     
@@ -168,26 +180,38 @@ with tab1:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
         
-        st.write("🎙️ **Ask with Voice:**")
-        audio_bytes = audio_recorder(text="Click to Record", recording_color="#e83e8c", neutral_color="#4F46E5", key="chat_audio")
+        # 1. SHRUNK THE MIC AND CHANGED TEXT
+        st.write("🎙️ **Voice Command:**")
+        audio_bytes = audio_recorder(
+            text="Click to Speak", 
+            recording_color="#e83e8c", 
+            neutral_color="#4F46E5", 
+            icon_size="1.5x", # 👈 THIS SHRINKS IT!
+            key="chat_audio"
+        )
         
         query = st.chat_input("Type your question here...")
         
         final_query = None
         if audio_bytes:
-            with st.spinner("Listening..."):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-                    temp_audio.write(audio_bytes)
-                    temp_audio_path = temp_audio.name
-                try:
-                    with open(temp_audio_path, "rb") as file:
-                        transcription = client.audio.transcriptions.create(
-                            file=("audio.wav", file.read()),
-                            model="whisper-large-v3",
-                        )
-                    final_query = transcription.text
-                except Exception as e:
-                    st.error("Audio error. Please try again.")
+            # 2. THE CUSTOM GLOWING ANIMATION
+            status_placeholder = st.empty()
+            status_placeholder.markdown('<div class="listening-animation">🎙️ AI is processing your voice...</div>', unsafe_allow_html=True)
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+                temp_audio.write(audio_bytes)
+                temp_audio_path = temp_audio.name
+            try:
+                with open(temp_audio_path, "rb") as file:
+                    transcription = client.audio.transcriptions.create(
+                        file=("audio.wav", file.read()),
+                        model="whisper-large-v3",
+                    )
+                final_query = transcription.text
+                status_placeholder.empty() # Clears the animation instantly when done!
+            except Exception as e:
+                status_placeholder.empty()
+                st.error("Audio error. Please try again.")
         elif query:
             final_query = query
             
